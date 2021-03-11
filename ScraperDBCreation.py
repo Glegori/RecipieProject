@@ -30,14 +30,18 @@ def insertData(data):
         x = mycol.insert_many(data)
         print("data was successfully inserted with the ids of: " + x.inserted_ids)
 
-def getTopics():
+def getData(query):
+    myData = mycol.find(query)
+    return myData
+
+def getTopicsFN():
     foodnetwork_topics = "https://www.foodnetwork.com/topics"
     topicNav_page = requests.get(foodnetwork_topics)
     topic_soup = BeautifulSoup(topicNav_page.content, 'html.parser')
     topic_elems = topic_soup.find_all('li', class_='m-PromoList__a-ListItem')
     for linkHolder in topic_elems: 
         link = linkHolder.find('a')['href']
-        getRecipies(link)
+        getRecipiesFN(link)
         if "https:" not in foodnetwork_topics: 
             topic_page = requests.get("http:" + foodnetwork_topics)
         elif "http" not in foodnetwork_topics:
@@ -46,7 +50,7 @@ def getTopics():
             topic_page = requests.get(foodnetwork_topics)
 
         
-def getRecipies(link):
+def getRecipiesFN(link):
     topic_page = requests.get("http:" + link)
     nav_soup = BeautifulSoup(topic_page.content,'html.parser')
     recipie_links = nav_soup.find_all(class_="m-MediaBlock__m-TextWrap")
@@ -54,7 +58,7 @@ def getRecipies(link):
         if not None in linkHolder:
             try:
                 recipie_link = linkHolder.find('a')['href']
-                navToRecipie(recipie_link)
+                navToRecipieFN(recipie_link)
             except:
                 continue
             if "https:" not in link: 
@@ -64,7 +68,7 @@ def getRecipies(link):
             else:
                 topic_page = requests.get(link)            
     
-def navToRecipie(link):
+def navToRecipieFN(link):
     if "https:" not in link:
         recipie_page = requests.get("http:" + link)
     else:
@@ -80,5 +84,23 @@ def navToRecipie(link):
 def defaultHome():
     return "Welcome to the default page WIP"
 
+@app.route("/search", methods = ['POST','GET'])
+def searchResults(tags):
+    if request.method == "POST":
+        tags = request.form["nameOfTag"]
+        #query here, gotta determine how the tags will
+        #return without corrupting the data and making sure which column
+        query = ""
+        queryResults = getData(query)
+        return render_template_string(craftHtml(queryResults), message="Hello world" )
+    else:
+        tags = request.args.get("")
+def craftRecipieListingHtml(data):
+    #figure out how to pass the css file with this way of doing it.
+    htmlString = ""
+    for document in data:
+        htmlString += "<div>" 
+        htmlString += "</div>"
+
 ##createDb()
-getTopics()    
+getTopicsFN()    
