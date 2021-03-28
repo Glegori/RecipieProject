@@ -11,24 +11,33 @@ def checkDbExists():
     dblist = myclient.list_database_names()
     if not "projectDB" in dblist:
         return True
-def checkCollectionExists():
+def checkCollectionExists(mydb):
     collist = mydb.list_collection_names()
     if not "recipies" in collist:
         return True
 def createDb():
+    global mycol
     if(checkDbExists()):
         mydb = myclient["projectDB"]
-        if(checkCollectionExists()):
-            global mycol
+        if(checkCollectionExists(mydb)):
             mycol = mydb["recipies"]
+        else:
+            #this is just a way of cleansing data
+            myclient.drop_database('projectDB')
+            mydb = myclient["projectDB"]
+            mycol = mydb["recipies"]
+    else:
+        myclient.drop_database('projectDB')
+        mydb = myclient["projectDB"]
+        mycol = mydb["recipies"]
 
 def insertData(data):
     if not isinstance(data, list):
         x = mycol.insert_one(data)
-        print("data was successfully inserted with the id of: " + x.inserted_id)
+        print(x.inserted_id)
     else:
         x = mycol.insert_many(data)
-        print("data was successfully inserted with the ids of: " + x.inserted_ids)
+        print(x.inserted_ids)
     
 
 def getData(query):
@@ -59,7 +68,8 @@ def getRecipiesAllRecipies():
     data = []
     sentinel = True
     i = 1
-    while sentinel == True:
+    while sentinel == True and i<50:
+        print(i)
         call = ajaxCall('https://www.allrecipes.com/element-api/content-proxy/faceted-searches-load-more/', i)
         i=i+1
         callSoup = BeautifulSoup(call['html'], 'html.parser')
@@ -72,14 +82,10 @@ def getRecipiesAllRecipies():
                 mongoEntry = reviewInfo = getReviewInfo(mongoEntry,link)
                 mongoEntry = getPrep(mongoEntry, link)
                 mongoEntry = getNutInfo(mongoEntry,link)
-                #mongoEntry = getAuth(mongoEntry,link)
-                print(mongoEntry)
-                data.append(mongoEntry)
-                print(call['hasNext'])
+                mongoEntry = getAuth(mongoEntry,link)
+                insertData(mongoEntry)
                 if not call['hasNext'] == True:
                     sentinel= False
-                    
-    print(data)
     #insertData(data)
                
 #this is the recipe info such as name and ingredients
@@ -106,36 +112,39 @@ def getNutInfo(entry,recipe):
     calstr = calstr[25:50]
     for x in "Calories:":
         calstr=calstr.replace(x,'')
-    nutlist['Calories']=float(calstr.strip())  
-    
+    nutlist['Calories']=calstr.strip() 
     nutbody = recipeSoup.find('div',class_='nutrition-body')
-    nutrition = nutbody.findChildren('div', class_='nutrition-row')
-    for row in nutrition:
-        category = row.findChildren(class_='nutrient-name')[0].find(text=True)
-        amount = row.findChildren(class_='nutrient-value')[0].text
-        if not 'calories from fat' in category:
-            nutlist[category.strip().replace(':','')]=amount.strip()
+    if not nutbody is None:
+        nutrition = nutbody.findChildren('div', class_='nutrition-row')
+        for row in nutrition:
+            category = row.findChildren(class_='nutrient-name')[0].find(text=True)
+            amount = row.findChildren(class_='nutrient-value')[0].text
+            if not 'calories from fat' in category:
+                nutlist[category.strip().replace(':','')]=amount.strip()
 
     entry['nutritionalInfo'] = nutlist
     return entry
 #this will be the author info
 def getAuth(entry,recipe):
-    recipe_Page = requests.get(recipe['href'])
-    auth = {}
-    recipeSoup = BeautifulSoup(recipe_Page.content, 'html.parser')
-    link = recipeSoup.find('a',class_='author-name link')
-    auth['Name'] = link.text
-    print(link['href'])
+    try:
+        recipe_Page = requests.get(recipe['href'])
+        auth = {}
+        recipeSoup = BeautifulSoup(recipe_Page.content, 'html.parser')
+        link = recipeSoup.find('a',class_='author-name link')
+        auth['Name'] = link.text
+    except:
+        return entry
+    #print(link['href'])
     #have to strip link in order to get the id then put it https://apps.allrecipes.com/v1/users/XXXX/recipes
-    jsonLink = link['href'] + '?isemailtofriend=false&page=1&pageSize=20&tenantId=12'
-    jsonRecipe = requests.get(jsonLink)
+    #jsonLink = link['href'] + '?isemailtofriend=false&page=1&pageSize=20&tenantId=12'
+    #jsonRecipe = requests.get(jsonLink)
     #author_Page = requests.get(link['href'])
     #authSoup = BeautifulSoup(author_Page.content, 'html.parser')
     #followers is a ajax call that returns json????
     #auth['Followers'] = followers.text
 
-    print(recList)
-    auth['RecipeAmount'] = len(recList)
+    #print(recList)
+    #auth['RecipeAmount'] = len(recList)
     entry['Author'] = auth
     return entry
 
@@ -145,9 +154,12 @@ def getPrep(entry,recipe):
     recipeSoup = BeautifulSoup(recipe_Page.content, 'html.parser')
     metaItem = recipeSoup.findAll('div',class_='recipe-meta-item')
     prep = {}
-    for item in metaItem:
-        childs = item.findChildren()
-        prep[childs[0].text.strip().replace(':','')]=childs[1].text.strip()
+    try:
+        for item in metaItem:
+            childs = item.findChildren()
+            prep[childs[0].text.strip().replace(':','')]=childs[1].text.strip()
+    except:
+        print()
     entry['Preparation'] = prep
     return entry
 
@@ -159,23 +171,30 @@ def getReviewInfo(entry,recipe):
     recipeReviewList = recipeReviews.findChildren('li')
     revTotal = 0
     revScore = 0
+    recipieAv = 0
     i=5
     reviews = {}
-    for rev in recipeReviewList:
-        count = rev.findChildren('span', class_='rating-count')
-        #print(count[0].text + " reviews for " + str(i) + " stars")
-        revTotal += int(count[0].text)
-        #print(str(revTotal) + " is the amount of reviews currently")
-        revScore += (int(count[0].text) * i)
-        #print(str(revScore) + " is the amount of score")
-        i-=1
-    recipieAv = revScore / revTotal
+    try:
+        for rev in recipeReviewList:
+            count = rev.findChildren('span', class_='rating-count')
+            #print(count[0].text + " reviews for " + str(i) + " stars")
+            revTotal += int(count[0].text)
+            #print(str(revTotal) + " is the amount of reviews currently")
+            revScore += (int(count[0].text) * i)
+            #print(str(revScore) + " is the amount of score")
+            i-=1
+    except:
+        print("error")
+    try:
+        recipieAv = revScore / revTotal
+    except:
+        print("divide by zero")
     reviews['Review Average']=recipieAv
     reviews['Total Ratings'] = revTotal
     entry['Reviews']=reviews
     return entry
     
-#createDb()
+createDb()
 getRecipiesAllRecipies()
 #def getTopicsFN():
  #   foodnetwork_topics = "https://www.foodnetwork.com/topics"
